@@ -139,3 +139,406 @@ Java提供了volatile关键字来保证可见性。
 * 有序性
 
 在Java里面，可以通过volatile关键字来保证一定的“有序性”（具体原理在下一节）。另外可以通过synchronized和Lock来保证有序性，很显然，synchronized和Lock保证每个时刻是由一个线程执行同步代码，相当于是让线程顺序执行同步代码，自然就保证了有序性。当然JMM是通过Happens-Before规则来保证有序性的。
+
+#### 关键字：volatile、synchronized和final
+
+#### Happens-Before规则
+
+上面提到了可以用volatile和synchronized来保证有序性。除此之外，JVM还规定了先行发生原则，让一个操作无需控制就能先于另一个操作完成。
+
+**1.单一线程原则**
+
+> Single Thread Rule
+
+在一个线程内，在程序前面的操作先行发生于后面的操作。
+
+![image-20220824104140201](Java并发.assets/image-20220824104140201-16613089031333.png)
+
+**2.管程锁定规则**
+
+> Monitor Lock Rule
+
+一个unlock操作先行发生于后面对同一个锁的lock操作。
+
+![image-20220824104523908](Java并发.assets/image-20220824104523908-16613091250195.png)
+
+**3.volatile变量规则**
+
+> Volatile Variable Rule
+
+对一个volatile变量的写操作先行发生于后面对这个变量的读操作
+
+![image-20220824104747968](Java并发.assets/image-20220824104747968.png)
+
+**4.线程启动规则**
+
+> Thread Start Rule
+
+Thread对象的start()方法调用先行发生于此线程的每一个动作
+
+![image-20220824104911049](Java并发.assets/image-20220824104911049-16613093524927.png)
+
+**5.线程加入规则**
+
+> Thread Join Rule
+
+Thread对象的结束先行发生于join()方法返回
+
+![image-20220824105630383](Java并发.assets/image-20220824105630383-16613097920779.png)
+
+**6.线程中断规则**
+
+> Thread Interruption Rule
+
+对线程interrupt()方法的调用先行发生于被中断线程的代码检查到中断事件的发生，可以通过interrtupted()方法检测到是否由中断发生
+
+**7.对象终结规则**
+
+> Finalizer Rule
+
+一个对象的初始化完成（构造函数执行结束）先行发生于它的finalize()方法的开始
+
+**8.传递性**
+
+> Transitivity
+
+如果操作A先行发生于操作B，操作B先行发生于操作C，那么操作A先行发生于操作C
+
+### 线程安全：不是一个非真即假的命题
+
+一个类在可以被多个线程安全调用时就是线程安全的。
+
+线程安全不是一个非真即假的命题，可以将共享数据按照安全程度的强弱顺序分为以下五类：不可变、绝对线程安全、相对线程安全、线程兼容和线程对立。
+
+#### 1.不可变
+
+不可变（Immutable）的对象一定是线程安全的，不需要再采用任何的线程安全保障措施。只要一个不可变的对象被正确地构建出来，永远也不会看到它在多个线程之中处于不一致的状态，
+
+多线程环境下，应当尽量使对象称为不可变，来满足线程安全。
+
+不可变的类型：
+
+* final关键字修饰的基本数据类型
+* String
+* 枚举类型
+* Number部分子类，如Long和Double等数值包装类型，BigInteger和BigDecimal等大数据类型。但同为Number的原子类Atomiclnteger和AtomicLong则是可变的
+
+对于集合类型，可以使用Collections.unmodifiableXXX()方法来获取一个不可变的集合
+
+```java
+public class ImmutableExample{
+	public static void main(String[] args){
+	Map<String, Integer> map = new HashMap<>();
+	Map<String, Integer> unmodifiableMap = Collections.unmodifiableMao(map);
+	unmodifiableMap.put("a",1);
+	}
+}
+```
+
+```html
+Exception in thread "main" java.lang.UnsupportedOperationException
+    at java.util.Collections$UnmodifiableMap.put(Collections.java:1457)
+    at ImmutableExample.main(ImmutableExample.java:9)
+
+```
+
+Collections.unmodifiableXXX()先对原始的集合进行拷贝，需要对集合进行修改的方法都直接抛出异常。
+
+```java
+public V put(K key,V value){
+	throw new UnsupportedOperationException();
+}
+```
+
+#### 2.绝对线程安全
+
+不管运行时环境如何，调用者都不需要任何额外的同步操作
+
+#### 3.相对线程安全
+
+相对线程安全需要保证对这个对象单独的操作是线程安全的，在待用的时候不需要做额外的保障措施。但是对于一些特定顺序的连续调用，就可能需要在调用端使用额外的同步手段来保证调用的正确性，
+
+在Java语言中，大部分的线程安全类都属于这种类型，例如Vectior、HashTble、Collection的synchronizedCollection()方法包装的集合等。
+
+对于下面的代码，如果删除元素的线程删除了Vector的一个元素，而获取元素的线程试图访问一个已经被删除的元素，那么就会抛出ArrayIndexOutOfBoundsException.
+
+```java
+public class VectorUnsafeExample {
+    private static Vector<Integer> vector = new Vector<>();
+
+    public static void main(String[] args) {
+        while (true) {
+            for (int i = 0; i < 100; i++) {
+                vector.add(i);
+            }
+            ExecutorService executorService = Executors.newCachedThreadPool();
+            executorService.execute(() -> {
+                for (int i = 0; i < vector.size(); i++) {
+                    vector.remove(i);
+                }
+            });
+            executorService.execute(() -> {
+                for (int i = 0; i < vector.size(); i++) {
+                    vector.get(i);
+                }
+            });
+            executorService.shutdown();
+        }
+    }
+}
+
+```
+
+```html
+Exception in thread "Thread-159738" java.lang.ArrayIndexOutOfBoundsException: Array index out of range: 3
+    at java.util.Vector.remove(Vector.java:831)
+    at VectorUnsafeExample.lambda$main$0(VectorUnsafeExample.java:14)
+    at VectorUnsafeExample$$Lambda$1/713338599.run(Unknown Source)
+    at java.lang.Thread.run(Thread.java:745)
+
+```
+
+如果要保证上面的代码能正确执行下去，就需要对删除元素和获取元素的代码进行同步。
+
+```java
+executorService.execute(() -> {
+    synchronized (vector) {
+        for (int i = 0; i < vector.size(); i++) {
+            vector.remove(i);
+        }
+    }
+});
+executorService.execute(() -> {
+    synchronized (vector) {
+        for (int i = 0; i < vector.size(); i++) {
+            vector.get(i);
+        }
+    }
+});
+
+```
+
+#### 4.线程兼容
+
+线程兼容是指对象本身并不是线程安全的，但是可以通过在调用端正确地使用同步手段来保证对象在并发环境中可以安全地使用，我们平常说一个类不是线程安全的，绝大多数时候指的是这一种情况。Java API中大部分的类都是属于线程兼容的，如与前面的Vector和HashTable相对于的集合类ArrayList和HashMap等。
+
+#### 5.线程对立
+
+线程对立是指无论调用端是否采取了同步措施，都无法在多线程环境中并发使用的代码。由于Java语言天生就具备多线程特性，线程对立这种排斥多线程的代码是很少出现的，而且通常都是有害的，应当尽量避免。
+
+### 线程安全的实现方法
+
+#### 1.互斥同步
+
+synchronized和ReentrantLock
+
+#### 2.非阻塞同步
+
+互斥同步最主用的问题就是线程阻塞和唤醒所带来的性能问题，因此这种同步也称为阻塞同步。
+
+互斥同步属于一种悲观的并发策略，总是认为只要不去做正确的同步措施，那就肯定会出现问题。无论共享数据是否真的会出现竞争，它都要进行加锁（这里讨论的是概念模型，实际上虚拟机会优化掉很大一部分不必要的加锁）、用户态核心态转换、维护锁计算器和检查是否有被阻塞的线程需要唤醒等操作。
+
+（一）CAS
+
+随着硬件指令集的发展，我们可以使用基于冲突检查的乐观并发策略：先进行操作，如果没有其它线程争用共享数据，那操作就成功了，否则采取补偿措施（不断地重试，直到成功为止）。这种乐观的并发策略的许多实现都不需要将线程阻塞，因此这种同步操作称为非阻塞同步。
+
+乐观锁需要操作和冲突检测这两个步骤具备原子性，这里就不能再使用互斥同步来保证了，只能靠硬件来完成。硬件支持的原子性操作最典型的是：比较并交换（Compare-and-Swap，CAS）。CAS指令需要有3个操作数，分别是内存地址V、旧的预期值A和新值B。当执行操作时，只有当V的值等于A，才将V的值更新为B。
+
+（二）AtomicInteger
+
+J.U.C包里面的整数原子类AtomicInteger，其中的compareAndSet()和getAndIncrement()等方法都使用了Unsafe类的CAS操作。
+
+以下代码使用了AtomicInteger执行了自增的操作。
+
+```java
+private AtomicInteger cnt = new AtomicInteger();
+
+public void add(){
+	cnt.incrementAndGet();
+}
+```
+
+以下代码是incrementAndGet()的源码，它调用了unsafe的getAndAddInt().
+
+```java
+public final int incrementAndGet(){
+	return unsafe.getAndAddInt(this,valueOffset,1)+1;
+}
+```
+
+以下代码是getAndAddInt()源码，var1指示对象内存地址，var2指示该字段相对对象内存地址的偏移，var4只是操作需要加的数值，这里为1。通过getIntVolatile(var1,var2)得到旧的预期值，通过调用compareAndSwapInt()来进行CAS比较，如果该字段内存地址中的值等于var5，那么就更新内存地址为var1+var2的变量为var5+var4。
+
+可以看到getAndAddInt()在一个循环中进行，发生冲突的做法是不断的进行重试。
+
+```java
+public final int getAndAddInt(Object var1, long var2, int var4){
+	int var5;
+	do{
+		var5 = this.getInVolatile(var1,var2);
+	}while(!this.compareAndSwapInt(var1,var2,var5,var5 + var4));
+	
+	return var5;
+}
+```
+
+（三）ABA
+
+如果一个变量初次读取的时候是A值，它的值被改成了B，后面又被改回了A，，那CAS操作就会误认为它从来没有被改变过。
+
+J.U.C包提供了一个带有标记的原子引用类AtomicStampedReference来解决这个问题，它可以通过控制变量值的版本来保证CAS的正确性。大部分情况下ABA问题不会影响程序并发的正确性，如果需要解决ABA问题，改用传统的互斥同步可能会比原子类更高效。
+
+#### 3.无同步方案incrementAndGet
+
+要保证线程安全，并不是一定就要进行同步，如果一个方法本来就不涉及共享数据，那它自然就无须任何同步措施去保证正确性。
+
+（一）栈封闭
+
+多个线程访问同一个方法的局部变量时，不会出现线程安全问题，因为局部变量存储在虚拟机栈中，属于线程私有的。
+
+```java
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class StackClosedExample {
+    public void add100() {
+        int cnt = 0;
+        for (int i = 0; i < 100; i++) {
+            cnt++;
+        }
+        System.out.println(cnt);
+    }
+}
+public static void main(String[] args) {
+    StackClosedExample example = new StackClosedExample();
+    ExecutorService executorService = Executors.newCachedThreadPool();
+    executorService.execute(() -> example.add100());
+    executorService.execute(() -> example.add100());
+    executorService.shutdown();
+}
+
+```
+
+```
+100
+100
+
+```
+
+（二）线程本地存储（Thread Local Storage）
+
+如果一段代码中所需要的数据必须与其他代码共享，那就看看这些共享数据的代码能否能保证在同一个线程中执行。如果能保证，我们就可以把共享数据的可见范围限制在同一个线程之内，这样，无须同步也能保证线程之间不出现数据争用的问题。
+
+符合这种特点的应用并不少见，大部分使用消费队列的架构模式（如“生产者-消费者”模式）都会将产品的消费过程尽量在一个线程中消费完。其中最重要的一个应用实例就是经典Web交互模型中的“一个请求对应一个服务器线程”（Thread-per-Request）的处理方式，这种处理方式的广泛应用使得很多Web服务端应用都可以使用线程本地存储来解决线程安全问题。
+
+可以使用java.lang.ThreadLocal类来实现线程本地存储功能。
+
+对于以下代码，thread1中设置threadLocal为1，而thread2设置threadLocal为2。过了一段时间之后，thread1读取threadLocal依然是1，不受thread2的影响。
+
+```java
+public class ThreadLocalExample {
+    public static void main(String[] args) {
+        ThreadLocal threadLocal = new ThreadLocal();
+        Thread thread1 = new Thread(() -> {
+           threadLocal.set(1);
+           try {
+               Thread.sleep(1000);
+           }catch (InterruptedException e){
+               e.printStackTrace();
+           }
+           System.out.println(threadLocal.get());
+           threadLocal.remove();
+        });
+
+        Thread thread2 = new Thread(() -> {
+            threadLocal.set(2);
+            threadLocal.remove();
+        });
+        thread1.start();
+        thread2.start();
+    }
+}
+```
+
+输出结果
+
+```java
+1
+```
+
+为了理解ThreadLocal，先看以下代码：
+
+```java
+public class ThreadLocalExample {
+    public static void main(String[] args) {
+
+        ThreadLocal threadLocal1 = new ThreadLocal();
+        ThreadLocal threadLocal2 = new ThreadLocal();
+        Thread thread1 = new Thread(() -> {
+           threadLocal1.set(1);
+           threadLocal2.set(1);
+        });
+        Thread thread2 = new Thread(() -> {
+            threadLocal1.set(2);
+            threadLocal2.set(2);
+        });
+        thread1.start();
+        thread2.start();
+    }
+}
+```
+
+它所对应的底层结构图为：
+
+![image-20220824145530653](Java并发.assets/image-20220824145530653-16613241318631.png)
+
+每个Thread都有一个ThreadLocal.ThreadLocalMap对象，Thread类中就定义了ThreadLocal.ThreadLocalMap成员。
+
+```java
+/* ThreadLocal values pertaining to this thread. This map is maintained
+ * by the ThreadLocal class. */
+ThreadLocal.ThreadLocalMap threadLocals = null;
+
+```
+
+当调用一个ThreadLocal的set(T value)方法时，先得到当前线程的ThreadLocalMap对象，然后将ThreadLocal->value键值对插入到该Map中。
+
+```java
+public void set(T value) {
+    Thread t = Thread.currentThread();
+    ThreadLocalMap map = getMap(t);
+    if (map != null)
+        map.set(this, value);
+    else
+        createMap(t, value);
+}
+
+```
+
+get()方法类似。
+
+```java
+public T get() {
+    Thread t = Thread.currentThread();
+    ThreadLocalMap map = getMap(t);
+    if (map != null) {
+        ThreadLocalMap.Entry e = map.getEntry(this);
+        if (e != null) {
+            @SuppressWarnings("unchecked")
+            T result = (T)e.value;
+            return result;
+        }
+    }
+    return setInitialValue();
+}
+
+```
+
+ThreadLocal从理论上讲并不是用来解决多线程并发问题的，因为根本不存在多线程竞争。
+
+在一些场景（尤其是使用线程池）下，由于ThreadLocal.ThreadLocalMap的底层数据结构导致ThreadLocal有内存泄漏的情况，应该尽可能在每次使用ThreadLocal后手动调用remove()，以避免出现ThreadLocal经典的内存泄露甚至是造成自身业务混乱的风险。
+
+（三）可重入代码（Reentrant Code）
+
+这种代码也叫做纯代码（Pure Code），可以在代码执行的任何时刻中断它，转而去执行另外一段代码（包括递归调用它本身），而在控制权返回后，原来的程序不会出现任何错误。
+
+可重入代码有一些共同的特征，例如不依赖存储在堆上的数据和公用的系统资源、用到的状态量都由参数中传入、不调用非可重入的方法等。
